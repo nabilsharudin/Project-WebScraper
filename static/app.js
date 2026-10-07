@@ -11,7 +11,6 @@ document.querySelectorAll('.loading-form').forEach((form) => {
   });
 });
 
-const importForm = document.querySelector('.import-form');
 const overlay = document.querySelector('.loading-overlay');
 const progressBar = document.querySelector('.progress-bar');
 const progressPercent = document.querySelector('.progress-percent');
@@ -49,17 +48,17 @@ async function pollImport(jobId) {
   }
 }
 
-if (importForm) {
-  importForm.addEventListener('submit', async (event) => {
+document.querySelectorAll('.progress-form').forEach((form) => {
+  form.addEventListener('submit', async (event) => {
     event.preventDefault();
     overlay.hidden = false;
-    showProgress({ percent: 0, phase: 'Starting a gentle import…' });
+    showProgress({ percent: 0, phase: 'Starting a gentle batch…' });
     try {
-      const response = await fetch(importForm.action, {
+      const response = await fetch(form.action, {
         method: 'POST',
-        body: new FormData(importForm),
+        body: new FormData(form),
       });
-      if (!response.ok) throw new Error('The import could not be started.');
+      if (!response.ok) throw new Error('The batch could not be started.');
       const data = await response.json();
       pollImport(data.job_id);
     } catch (error) {
@@ -67,7 +66,16 @@ if (importForm) {
       loadingDetail.textContent = error.message;
     }
   });
-}
+});
 
 const alert = document.querySelector('.alert');
 if (alert) window.setTimeout(() => alert.remove(), 5000);
+
+document.querySelectorAll('.clear-data-form').forEach((form) => {
+  form.addEventListener('submit', (event) => {
+    const confirmed = window.confirm(
+      'Clear every local lecturer record, website result, outreach status, and note? This cannot be undone.'
+    );
+    if (!confirmed) event.preventDefault();
+  });
+});

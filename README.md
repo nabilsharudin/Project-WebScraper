@@ -27,6 +27,8 @@ If PowerShell blocks activation, you can skip it and use the virtual environment
 - Imports one UTM directory faculty or department URL at a time in resumable batches.
 - Imports and exports active lecturer/professor positions by default while retaining an optional all-staff view.
 - Shows live progress while scanning departments and lecturer profiles.
+- Checks People@UTM sites in the same small, resumable, rate-limited batches.
+- Offers a capped 30-site website check that pauses for 45 seconds after each group of 10.
 - Accepts manual entries and CSV files.
 - Groups and filters lecturers by faculty.
 - Checks the likely People@UTM URL derived from each UTM email username.

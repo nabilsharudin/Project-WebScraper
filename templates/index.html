@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="A private dashboard for organizing UTM lecturer website research.">
   <title>UTM Site Scout</title>
-  <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}?v=2">
+  <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}?v=5">
 </head>
 <body>
   <header class="topbar">
@@ -13,7 +13,12 @@
       <span class="brand-mark">US</span>
       <span><strong>UTM Site Scout</strong><small>Private research dashboard</small></span>
     </a>
-    <a class="button ghost" href="/export.csv?lecturers_only=true">Export lecturers CSV</a>
+    <div class="topbar-actions">
+      <a class="button ghost" href="/export.csv?lecturers_only=true">Export lecturers CSV</a>
+      <form action="/data/clear" method="post" class="clear-data-form">
+        <button class="button clear-button" type="submit">Clear local data</button>
+      </form>
+    </div>
   </header>
 
   <main>
@@ -42,10 +47,10 @@
       <div class="panel import-panel">
         <div class="panel-heading"><div><span class="step">01</span><h2>Bring in contacts</h2></div></div>
         <p class="muted">Import one official faculty or department at a time. Small resumable batches protect the UTM service.</p>
-        <form action="/imports/start" method="post" class="stack import-form">
+        <form action="/imports/start" method="post" class="stack import-form progress-form">
           <label for="source_url">UTM directory URL</label>
           <div class="input-action">
-            <input id="source_url" name="source_url" type="url" required value="https://www.utm.my/directory/faculty/fakulti-komputeran" aria-describedby="source-help">
+            <input id="source_url" name="source_url" type="url" required placeholder="Paste a UTM faculty or department directory URL" aria-describedby="source-help">
             <button class="button primary" type="submit">Import</button>
           </div>
           <label class="batch-field" for="batch_size">Profiles this batch
@@ -91,8 +96,15 @@
     <section class="directory-section">
       <div class="section-heading">
         <div><span class="eyebrow">YOUR WORKSPACE</span><h2>Lecturer directory</h2></div>
-        <form action="/websites/check" method="post" class="loading-form">
-          <button class="button primary" type="submit" {% if counts.unchecked == 0 %}disabled{% endif %}>Check unchecked sites</button>
+        <form action="/websites/check/start" method="post" class="check-batch-form progress-form">
+          <label for="website_batch_size">Check batch
+            <select id="website_batch_size" name="batch_size" aria-label="Website checks per batch">
+              <option value="5" selected>5 · extra gentle</option>
+              <option value="10">10 · recommended</option>
+              <option value="30">30 · three gentle groups</option>
+            </select>
+          </label>
+          <button class="button primary" type="submit" {% if counts.unchecked == 0 %}disabled{% endif %}>Check selected batch</button>
         </form>
       </div>
 
@@ -102,11 +114,15 @@
           <option value="">All faculties</option>
           {% for item in faculties %}<option value="{{ item }}" {% if filters.faculty == item %}selected{% endif %}>{{ item }}</option>{% endfor %}
         </select>
-        <select name="website_status" aria-label="Filter by website status">
-          <option value="">All website states</option>
-          {% for value, label in [('unchecked','Unchecked'),('found','Found'),('not_found','Not found'),('error','Error')] %}
+        <select name="website_status" aria-label="Filter by website check result">
+          <option value="">All checks</option>
+          {% for value, label in [('checked','Checked'),('found','Found'),('not_found','Not found'),('unchecked','Not checked'),('error','Error')] %}
           <option value="{{ value }}" {% if filters.website_status == value %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
+        </select>
+        <select name="department" aria-label="Filter by department">
+          <option value="">All departments</option>
+          {% for item in departments %}<option value="{{ item }}" {% if filters.department == item %}selected{% endif %}>{{ item }}</option>{% endfor %}
         </select>
         <select name="role" aria-label="Filter by staff role">
           <option value="lecturers" {% if filters.role == 'lecturers' %}selected{% endif %}>Lecturers only</option>
@@ -132,7 +148,8 @@
                 <small>{{ lecturer.department }}{% if lecturer.position %} · {{ lecturer.position }}{% endif %}</small>
               </td>
               <td data-label="Website">
-                <span class="status {{ lecturer.website_status }}">{{ lecturer.website_status.replace('_',' ') }}</span>
+                <span class="status {{ lecturer.website_status }}">{% if lecturer.website_status == 'unchecked' %}not checked{% else %}{{ lecturer.website_status.replace('_',' ') }}{% endif %}</span>
+                {% if lecturer.checked_at %}<span class="check-state">Checked {{ lecturer.checked_at }}</span>{% else %}<span class="check-state pending">Not checked yet</span>{% endif %}
                 {% if lecturer.people_url %}<a class="site-link" href="{{ lecturer.people_url }}" target="_blank" rel="noreferrer">{{ lecturer.website_title or lecturer.people_url }} ↗</a>{% endif %}
                 {% if lecturer.website_note %}<small title="{{ lecturer.website_note }}">{{ lecturer.website_note }}</small>{% endif %}
               </td>
@@ -177,6 +194,6 @@
       <b class="progress-percent">0%</b>
     </div>
   </div>
-  <script src="{{ url_for('static', path='/app.js') }}?v=2"></script>
+  <script src="{{ url_for('static', path='/app.js') }}?v=5"></script>
 </body>
 </html>

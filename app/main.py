@@ -3,6 +3,9 @@ from __future__ import annotations
 import csv
 import io
 import re
+import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from urllib.parse import quote
 
@@ -15,13 +18,28 @@ from . import repository
 from .database import init_db
 from .import_jobs import create_job, get_job, update_job
 from .roles import is_lecturer_position
-from .scraper import EMAIL_RE, ScrapeError, check_people_site, scrape_directory
+from .scraper import (
+    DEFAULT_REQUEST_DELAY,
+    EMAIL_RE,
+    MAX_BATCH_SIZE,
+    ScrapeError,
+    check_people_site,
+    polite_pause,
+    scrape_directory,
+)
 
 
 ROOT = Path(__file__).resolve().parent.parent
+MAX_WEBSITE_CHECK_BATCH_SIZE = 30
+WEBSITE_CHECK_GROUP_SIZE = 10
+WEBSITE_CHECK_COOLDOWN_SECONDS = 45
 app = FastAPI(title="UTM Site Scout")
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 templates = Jinja2Templates(directory=ROOT / "templates")
+
+
+def checked_timestamp() -> str:
+    return datetime.now(ZoneInfo("Asia/Kuala_Lumpur")).strftime("%d %b %Y, %H:%M")
 
 
 @app.on_event("startup")
@@ -40,6 +58,7 @@ def dashboard(
     request: Request,
     search: str = "",
     faculty: str = "",
+    department: str = "",
     website_status: str = "",
     role: str = "lecturers",
     message: str = "",
@@ -51,13 +70,19 @@ def dashboard(
         "index.html",
         {
             "lecturers": repository.list_lecturers(
-                search, faculty, website_status, lecturers_only=lecturers_only
+                search,
+                faculty,
+                website_status,
+                department=department,
+                lecturers_only=lecturers_only,
             ),
             "faculties": repository.faculties(),
+            "departments": repository.departments(lecturers_only=lecturers_only),
             "counts": repository.counts(lecturers_only=lecturers_only),
             "filters": {
                 "search": search,
                 "faculty": faculty,
+                "department": department,
                 "website_status": website_status,
                 "role": role,
             },
@@ -212,19 +237,59 @@ def check_website(lecturer_id: int):
             "website_status": result.status,
             "website_title": result.title,
             "website_note": result.note,
+            "checked_at": checked_timestamp(),
         },
     )
     label = "Website found" if result.status == "found" else "Website check complete"
     return redirect(f"{label} for {lecturer['name']}.")
 
 
-@app.post("/websites/check")
-def check_all_websites():
+def run_website_check_job(job_id: str, batch_size: int) -> None:
+    batch_size = max(1, min(int(batch_size), MAX_WEBSITE_CHECK_BATCH_SIZE))
     lecturers = repository.list_lecturers(
         website_status="unchecked", lecturers_only=True
+    )[:batch_size]
+    total = len(lecturers)
+    update_job(
+        job_id,
+        status="running",
+        phase="Preparing People@UTM checks",
+        current=0,
+        total=total,
+        percent=2,
     )
+    if not lecturers:
+        update_job(
+            job_id,
+            status="completed",
+            phase="Nothing left to check",
+            percent=100,
+            message="There are no unchecked lecturer websites.",
+        )
+        return
+
     checked = 0
-    for lecturer in lecturers[:50]:
+    for index, lecturer in enumerate(lecturers, start=1):
+        if index > 1 and (index - 1) % WEBSITE_CHECK_GROUP_SIZE == 0:
+            update_job(
+                job_id,
+                phase=(
+                    "Cooling down before the next group of 10 "
+                    f"({WEBSITE_CHECK_COOLDOWN_SECONDS}s)"
+                ),
+                current=index - 1,
+                total=total,
+                percent=round(5 + 90 * (index - 1) / total),
+            )
+            time.sleep(WEBSITE_CHECK_COOLDOWN_SECONDS)
+        update_job(
+            job_id,
+            phase="Checking People@UTM sites respectfully",
+            current=index - 1,
+            total=total,
+            percent=round(5 + 90 * (index - 1) / total),
+        )
+        polite_pause(DEFAULT_REQUEST_DELAY)
         result = check_people_site(lecturer["email"], lecturer["people_url"])
         repository.update_lecturer(
             lecturer["id"],
@@ -233,11 +298,59 @@ def check_all_websites():
                 "website_status": result.status,
                 "website_title": result.title,
                 "website_note": result.note,
+                "checked_at": checked_timestamp(),
             },
         )
         checked += 1
-    suffix = " (maximum 50 per batch)" if len(lecturers) > 50 else ""
-    return redirect(f"Checked {checked} lecturer websites{suffix}.")
+        if result.stop_batch:
+            update_job(
+                job_id,
+                status="completed",
+                phase="Batch paused for UTM",
+                current=index,
+                total=total,
+                percent=round(5 + 90 * index / total),
+                message=(
+                    f"Paused after {checked} website check(s): {result.note} "
+                    "Wait before starting the next batch."
+                ),
+            )
+            return
+        update_job(
+            job_id,
+            current=index,
+            total=total,
+            percent=round(5 + 90 * index / total),
+        )
+    remaining = len(
+        repository.list_lecturers(website_status="unchecked", lecturers_only=True)
+    )
+    message = f"Checked {checked} website(s) gently."
+    if remaining:
+        message += f" {remaining} remain; start another batch later to continue."
+    update_job(
+        job_id,
+        status="completed",
+        phase="Website checks complete",
+        current=total,
+        total=total,
+        percent=100,
+        message=message,
+    )
+
+
+@app.post("/websites/check/start")
+def start_website_check(
+    background_tasks: BackgroundTasks, batch_size: int = Form(5)
+):
+    job = create_job()
+    background_tasks.add_task(run_website_check_job, job["id"], batch_size)
+    return {"job_id": job["id"]}
+
+
+@app.post("/websites/check")
+def legacy_website_check():
+    return redirect("Use the batched website checker so requests stay rate-limited.", "error")
 
 
 @app.post("/lecturers/{lecturer_id}/update")
@@ -262,6 +375,12 @@ def delete_lecturer(lecturer_id: int):
     return redirect("Lecturer removed.")
 
 
+@app.post("/data/clear")
+def clear_data():
+    repository.clear_lecturers()
+    return redirect("All local lecturer records, website checks, and notes were cleared.")
+
+
 @app.get("/export.csv")
 def export_csv(lecturers_only: bool = True):
     rows = repository.list_lecturers(lecturers_only=lecturers_only)
@@ -277,6 +396,7 @@ def export_csv(lecturers_only: bool = True):
         "website_status",
         "website_title",
         "website_note",
+        "checked_at",
         "contact_status",
         "notes",
     ]

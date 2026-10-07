@@ -28,6 +28,7 @@ def init_db() -> None:
                 website_status TEXT NOT NULL DEFAULT 'unchecked',
                 website_title TEXT NOT NULL DEFAULT '',
                 website_note TEXT NOT NULL DEFAULT '',
+                checked_at TEXT NOT NULL DEFAULT '',
                 contact_status TEXT NOT NULL DEFAULT 'not_contacted',
                 notes TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -38,6 +39,21 @@ def init_db() -> None:
                 ON lecturers(faculty);
             CREATE INDEX IF NOT EXISTS idx_lecturers_website_status
                 ON lecturers(website_status);
+            """
+        )
+        columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(lecturers)").fetchall()
+        }
+        if "checked_at" not in columns:
+            connection.execute(
+                "ALTER TABLE lecturers ADD COLUMN checked_at TEXT NOT NULL DEFAULT ''"
+            )
+        connection.execute(
+            """
+            UPDATE lecturers
+            SET checked_at = 'Earlier check (time unavailable)'
+            WHERE checked_at = '' AND website_status <> 'unchecked'
             """
         )
 
@@ -51,4 +67,3 @@ def connect() -> Iterator[sqlite3.Connection]:
         connection.commit()
     finally:
         connection.close()
-

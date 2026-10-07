@@ -239,6 +239,7 @@ class WebsiteResult:
     status: str
     title: str = ""
     note: str = ""
+    stop_batch: bool = False
 
 
 def people_url_for_email(email: str) -> str:
@@ -261,12 +262,20 @@ def check_people_site(email: str, existing_url: str = "") -> WebsiteResult:
             timeout=12.0,
             follow_redirects=True,
             headers={"User-Agent": USER_AGENT},
+            transport=httpx.HTTPTransport(retries=1),
         ) as client:
             response = client.get(candidate)
         text = response.text.lower()
         missing_markers = ("page not found", "nothing found", "error 404", "site not found")
         if response.status_code == 404 or any(marker in text for marker in missing_markers):
             return WebsiteResult(candidate, "not_found", note="No site was found at the email-based URL.")
+        if response.status_code in {403, 429, 503}:
+            return WebsiteResult(
+                candidate,
+                "error",
+                note=f"Website returned HTTP {response.status_code}; batch paused to respect UTM.",
+                stop_batch=True,
+            )
         if response.status_code >= 400:
             return WebsiteResult(candidate, "error", note=f"Website returned HTTP {response.status_code}.")
         soup = BeautifulSoup(response.text, "html.parser")
@@ -276,6 +285,13 @@ def check_people_site(email: str, existing_url: str = "") -> WebsiteResult:
             "found",
             title=title,
             note="Found using the UTM email username. Review the site to confirm the owner.",
+        )
+    except httpx.TimeoutException as error:
+        return WebsiteResult(
+            candidate,
+            "error",
+            note="Website timed out; batch paused to respect UTM.",
+            stop_batch=True,
         )
     except httpx.HTTPError as error:
         return WebsiteResult(candidate, "error", note=f"Could not check site: {type(error).__name__}")

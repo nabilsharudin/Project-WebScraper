@@ -27,6 +27,7 @@ def list_lecturers(
     search: str = "",
     faculty: str = "",
     website_status: str = "",
+    department: str = "",
     lecturers_only: bool = False,
 ) -> list[sqlite3.Row]:
     clauses: list[str] = []
@@ -38,7 +39,12 @@ def list_lecturers(
     if faculty:
         clauses.append("faculty = ?")
         parameters.append(faculty)
-    if website_status:
+    if department:
+        clauses.append("department = ?")
+        parameters.append(department)
+    if website_status == "checked":
+        clauses.append("website_status <> 'unchecked'")
+    elif website_status:
         clauses.append("website_status = ?")
         parameters.append(website_status)
 
@@ -58,6 +64,11 @@ def faculties() -> list[str]:
             "SELECT DISTINCT faculty FROM lecturers WHERE faculty <> '' ORDER BY faculty"
         ).fetchall()
     return [row["faculty"] for row in rows]
+
+
+def departments(lecturers_only: bool = False) -> list[str]:
+    rows = list_lecturers(lecturers_only=lecturers_only)
+    return sorted({row["department"] for row in rows if row["department"]})
 
 
 def counts(lecturers_only: bool = False) -> dict[str, int]:
@@ -126,6 +137,7 @@ def update_lecturer(lecturer_id: int, data: dict[str, Any]) -> None:
         "website_status",
         "website_title",
         "website_note",
+        "checked_at",
         "contact_status",
         "notes",
     }
@@ -143,3 +155,8 @@ def update_lecturer(lecturer_id: int, data: dict[str, Any]) -> None:
 def delete_lecturer(lecturer_id: int) -> None:
     with connect() as connection:
         connection.execute("DELETE FROM lecturers WHERE id = ?", (lecturer_id,))
+
+
+def clear_lecturers() -> None:
+    with connect() as connection:
+        connection.execute("DELETE FROM lecturers")
